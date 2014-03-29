@@ -162,11 +162,15 @@ libwebsock_shutdown(libwebsock_client_state *state)
   }
 
   if ((state->flags & STATE_CONNECTED) && state->onclose) {
-    pthread_t onclose_thread;
-    pthread_attr_t onclose_attr;
-    pthread_attr_init(&onclose_attr);
-    pthread_attr_setdetachstate(&onclose_attr, PTHREAD_CREATE_DETACHED);
-    pthread_create(&onclose_thread, &onclose_attr, libwebsock_pthread_onclose, (void *) state);
+    if (state->use_threads) {
+      pthread_t onclose_thread;
+      pthread_attr_t onclose_attr;
+      pthread_attr_init(&onclose_attr);
+      pthread_attr_setdetachstate(&onclose_attr, PTHREAD_CREATE_DETACHED);
+      pthread_create(&onclose_thread, &onclose_attr, libwebsock_pthread_onclose, (void *) state);
+    } else {
+      state->onclose(state);
+    }
   }
   bufferevent_free(state->bev);
   //schedule cleanup.
@@ -300,6 +304,8 @@ libwebsock_handle_accept(evutil_socket_t listener, short event, void *arg)
   client_state->onpong = ctx->onpong;
   client_state->sa = (struct sockaddr_storage *) lws_malloc(sizeof(struct sockaddr_storage));
   client_state->ctx = (void *) ctx;
+  client_state->use_threads = ctx->use_threads;
+  client_state->owns_message = ctx->owns_message;
   memcpy(client_state->sa, &ss, sizeof(struct sockaddr_storage));
   evutil_make_socket_nonblocking(fd);
   bev = bufferevent_socket_new(ctx->base, fd, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
@@ -508,23 +514,31 @@ libwebsock_dispatch_message(libwebsock_client_state *state)
   first->payload_len = -1;
   first->state = 0;
   state->current_frame = first;
-
-  msg = (libwebsock_message *) lws_malloc(sizeof(libwebsock_message));
-  msg->opcode = message_opcode;
-  msg->payload_len = message_payload_len;
-  msg->payload = message_payload_orig;
   
-  libwebsock_onmessage_wrapper *wrapper = (libwebsock_onmessage_wrapper *) lws_malloc(sizeof(libwebsock_onmessage_wrapper));
-  wrapper->state = state;
-  wrapper->msg = msg;
-
   if (state->onmessage != NULL) {
-    pthread_t onmessage_thread;
-    pthread_attr_t onmessage_attr;
-    pthread_attr_init(&onmessage_attr);
-    pthread_attr_setdetachstate(&onmessage_attr, PTHREAD_CREATE_DETACHED);
-    pthread_create(&onmessage_thread, &onmessage_attr, libwebsock_pthread_onmessage, (void *) wrapper);
-    //TODO: maybe check ret?  What can fail here?
+    msg = (libwebsock_message *) lws_malloc(sizeof(libwebsock_message));
+    msg->opcode = message_opcode;
+    msg->payload_len = message_payload_len;
+    msg->payload = message_payload_orig;
+
+    if (state->use_threads) {
+      libwebsock_onmessage_wrapper *wrapper = (libwebsock_onmessage_wrapper *) lws_malloc(sizeof(libwebsock_onmessage_wrapper));
+      wrapper->state = state;
+      wrapper->msg = msg;
+
+      pthread_t onmessage_thread;
+      pthread_attr_t onmessage_attr;
+      pthread_attr_init(&onmessage_attr);
+      pthread_attr_setdetachstate(&onmessage_attr, PTHREAD_CREATE_DETACHED);
+      pthread_create(&onmessage_thread, &onmessage_attr, libwebsock_pthread_onmessage, (void *) wrapper);
+      //TODO: maybe check ret?  What can fail here?
+    } else {
+      state->onmessage(state, msg);
+      if (state->owns_message) {
+        free(msg->payload);
+        free(msg);
+      }
+    }
   } else {
     fprintf(stderr, "No onmessage call back registered with libwebsock.\n");
   }
@@ -541,8 +555,10 @@ libwebsock_pthread_onmessage(void *arg)
      may be finished by the time this thread's callback is done.
      Raising this signal makes libevent run */
   raise(SIGUSR2);
-  free(msg->payload);
-  free(msg);
+  if (state->owns_message) {
+    free(msg->payload);
+    free(msg);
+  }
   free(wrapper);
   return NULL;
 }
@@ -639,11 +655,15 @@ libwebsock_handshake_finish(struct bufferevent *bev, libwebsock_client_state *st
   ctx->clients_HEAD = state;
 
   if (state->onopen != NULL) {
-    pthread_t onopen_thread;
-    pthread_attr_t onopen_attr;
-    pthread_attr_init(&onopen_attr);
-    pthread_attr_setdetachstate(&onopen_attr, PTHREAD_CREATE_DETACHED);
-    pthread_create(&onopen_thread, &onopen_attr, libwebsock_pthread_onopen, (void *) state);
+    if (state->use_threads) {
+      pthread_t onopen_thread;
+      pthread_attr_t onopen_attr;
+      pthread_attr_init(&onopen_attr);
+      pthread_attr_setdetachstate(&onopen_attr, PTHREAD_CREATE_DETACHED);
+      pthread_create(&onopen_thread, &onopen_attr, libwebsock_pthread_onopen, (void *) state);
+    } else {
+      state->onopen(state);
+    }
   }
 }
 

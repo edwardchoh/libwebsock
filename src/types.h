@@ -80,6 +80,8 @@ typedef struct _libwebsock_client_state {
 #endif
         libwebsock_close_info *close_info;
         void *ctx;
+        int use_threads; //callback on own thread
+        int owns_message; //libwebsock frees message after callback
         struct _libwebsock_client_state *next;
         struct _libwebsock_client_state *prev;
 } libwebsock_client_state;
@@ -97,6 +99,8 @@ typedef struct _libwebsock_context {
         int (*onpong)(libwebsock_client_state *);
         libwebsock_client_state *clients_HEAD;
         void *user_data; //context specific user data
+        int use_threads; //callback on own thread
+        int owns_message; //libwebsock frees message after callback
 } libwebsock_context;
 
 typedef struct _libwebsock_onmessage_wrapper {

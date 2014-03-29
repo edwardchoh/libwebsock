@@ -262,6 +262,8 @@ libwebsock_init_base(struct event_base *base, int flags)
   ctx->onopen = libwebsock_default_onopen_callback;
   ctx->control_callback = libwebsock_default_control_callback;
   ctx->onmessage = libwebsock_default_onmessage_callback;
+  ctx->use_threads = 1;
+  ctx->owns_message = 1;
 
 #ifdef _WIN32
   WSADATA WSAData;
