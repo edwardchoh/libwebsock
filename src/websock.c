@@ -590,7 +590,7 @@ libwebsock_handshake_finish(struct bufferevent *bev, libwebsock_client_state *st
   char sha1buf[45];
   char concat[1024];
   unsigned char sha1mac[20];
-  char *tok = NULL, *headers = NULL, *key = NULL;
+  char *tok = NULL, *headers = NULL, *key = NULL, *protocol = NULL;
   char *base64buf = NULL;
   const char *GID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
   SHA1Context shactx;
@@ -605,7 +605,8 @@ libwebsock_handshake_finish(struct bufferevent *bev, libwebsock_client_state *st
     if (strstr(tok, "Sec-WebSocket-Key: ") != NULL) {
       key = (char *) lws_malloc(strlen(tok));
       strncpy(key, tok + strlen("Sec-WebSocket-Key: "), strlen(tok));
-      break;
+    } else if (strstr(tok, "Sec-WebSocket-Protocol: ") != NULL) {
+      protocol = strdup(tok);
     }
   }
   free(headers);
@@ -617,6 +618,13 @@ libwebsock_handshake_finish(struct bufferevent *bev, libwebsock_client_state *st
     fprintf(stderr, "Unable to find key in request headers.\n");
     bufferevent_free(bev);
     return;
+  }
+
+  if (protocol) {
+    /* pick the first protocol if any */
+    char *comma = strchr(protocol, ',');
+    if (comma)
+    	*comma = '\0';
   }
 
   memset(concat, 0, sizeof(concat));
@@ -639,8 +647,10 @@ libwebsock_handshake_finish(struct bufferevent *bev, libwebsock_client_state *st
       "Server: %s/%s\r\n"
       "Upgrade: websocket\r\n"
       "Connection: Upgrade\r\n"
-      "Sec-WebSocket-Accept: %s\r\n\r\n", WEBSOCK_PACKAGE_NAME, WEBSOCK_PACKAGE_VERSION, base64buf);
+      "Sec-WebSocket-Accept: %s\r\n%s%s\r\n", WEBSOCK_PACKAGE_NAME, WEBSOCK_PACKAGE_VERSION, base64buf,
+      protocol ? protocol : "", protocol ? "\r\n" : "");
   free(base64buf);
+  free(protocol);
 
   evbuffer_add(output, buf, strlen(buf));
   bufferevent_setcb(bev, libwebsock_handle_recv, libwebsock_handle_send, libwebsock_do_event, (void *) state);
